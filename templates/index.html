@@ -1,0 +1,317 @@
+{% extends 'layout.html' %}
+
+{% block title %}Monitoreo - NeoCam Monitor{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dashboard-header {
+        margin-bottom: 2rem;
+    }
+    
+    .dashboard-header h1 {
+        font-size: 2.25rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #ffffff, #64748b);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .dashboard-header p {
+        color: var(--text-secondary);
+        font-size: 1.05rem;
+        margin-top: 0.25rem;
+    }
+
+    /* Stream Grid */
+    .streams-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .camera-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 1rem;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        transition: var(--transition-smooth);
+        position: relative;
+    }
+
+    .camera-card:hover {
+        border-color: var(--border-hover);
+        box-shadow: var(--shadow-glow);
+    }
+
+    .camera-video-container {
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%; /* 16:9 Aspect Ratio */
+        background: #000;
+        overflow: hidden;
+    }
+
+    .camera-feed {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.5s ease;
+    }
+
+    .camera-card:hover .camera-feed {
+        transform: scale(1.02);
+    }
+
+    .camera-overlay {
+        position: absolute;
+        top: 0.75rem;
+        left: 0.75rem;
+        right: 0.75rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        z-index: 10;
+        pointer-events: none;
+    }
+
+    .camera-badge {
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        text-transform: uppercase;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        box-shadow: var(--shadow-sm);
+        pointer-events: auto;
+    }
+
+    .camera-actions-overlay {
+        position: absolute;
+        bottom: 0.75rem;
+        right: 0.75rem;
+        display: flex;
+        gap: 0.5rem;
+        z-index: 10;
+        opacity: 0;
+        transform: translateY(5px);
+        transition: var(--transition-smooth);
+    }
+
+    .camera-card:hover .camera-actions-overlay {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .overlay-btn {
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid var(--border-color);
+        color: #fff;
+        width: 2.25rem;
+        height: 2.25rem;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: var(--transition-smooth);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        pointer-events: auto;
+    }
+
+    .overlay-btn:hover {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+        box-shadow: 0 0 10px var(--primary);
+    }
+
+    .camera-info {
+        padding: 1.25rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.4);
+        border-top: 1px solid var(--border-color);
+    }
+
+    .camera-details {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .camera-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        text-decoration: none;
+        transition: var(--transition-smooth);
+    }
+
+    .camera-title:hover {
+        color: var(--primary);
+    }
+
+    .camera-source {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+    }
+
+    /* Empty state */
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 5rem 2rem;
+        max-width: 600px;
+        margin: 2rem auto;
+    }
+
+    .empty-icon {
+        width: 5rem;
+        height: 5rem;
+        background: rgba(16, 185, 129, 0.05);
+        color: var(--primary);
+        border: 1px dashed rgba(16, 185, 129, 0.3);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        margin-bottom: 1.5rem;
+        animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+        0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.2); }
+        70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+        100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .empty-state h2 {
+        font-size: 1.5rem;
+        margin-bottom: 0.75rem;
+        color: var(--text-primary);
+    }
+
+    .empty-state p {
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+        line-height: 1.5;
+    }
+
+    @media (max-width: 550px) {
+        .streams-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header flex-between">
+    <div>
+        <h1 id="title-dashboard">Centro de Monitoreo</h1>
+        <p>Vista en vivo de todas las cámaras conectadas en tu homeserver.</p>
+    </div>
+    {% if cameras %}
+    <a href="/admin" class="btn btn-secondary" id="btn-manage-dashboard">
+        <i data-lucide="cog"></i> Configurar Cámaras
+    </a>
+    {% endif %}
+</div>
+
+{% if cameras %}
+    <div class="streams-grid" id="streams-grid">
+        {% for camera in cameras %}
+            <div class="camera-card" id="camera-card-{{ camera.id }}">
+                <div class="camera-video-container">
+                    <div class="camera-overlay">
+                        {% if camera.is_enabled %}
+                            <span class="camera-badge badge-success"><span style="width: 6px; height: 6px; background: #fff; border-radius: 50%; display: inline-block; animation: pulse 1s infinite; margin-right: 4px;"></span>EN VIVO</span>
+                        {% else %}
+                            <span class="camera-badge badge-danger">APAGADO</span>
+                        {% endif %}
+                        <span class="camera-badge badge-info">{{ camera.type | upper }}</span>
+                    </div>
+
+                    {% if camera.is_enabled %}
+                        <img src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="{{ camera.name }}" class="camera-feed" id="video-feed-{{ camera.id }}">
+                    {% else %}
+                        <div style="position: absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#111827; color:#64748b;">
+                            <div style="text-align: center;">
+                                <i data-lucide="video-off" style="width: 2.5rem; height: 2.5rem; margin-bottom: 0.5rem;"></i>
+                                <p style="font-size: 0.9rem;">Cámara Desactivada</p>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    <div class="camera-actions-overlay">
+                        <a href="{{ url_for('camera_detail', camera_id=camera.id) }}" class="overlay-btn" title="Pantalla Completa" id="btn-fullscreen-{{ camera.id }}">
+                            <i data-lucide="maximize-2" style="width: 1.1rem; height: 1.1rem;"></i>
+                        </a>
+                    </div>
+                </div>
+                <div class="camera-info">
+                    <div class="camera-details">
+                        <a href="{{ url_for('camera_detail', camera_id=camera.id) }}" class="camera-title" id="link-camera-title-{{ camera.id }}">{{ camera.name }}</a>
+                        <span class="camera-source">
+                            <i data-lucide="link" style="width: 0.85rem; height: 0.85rem;"></i>
+                            {{ camera.source }}
+                        </span>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button onclick="toggleCameraStatus({{ camera.id }}, this)" class="btn btn-secondary btn-sm" id="btn-toggle-{{ camera.id }}" title="Prender/Apagar">
+                            <i data-lucide="{% if camera.is_enabled %}eye-off{% else %}eye{% endif %}" style="width: 1rem; height: 1rem;"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="glass-card empty-state" id="empty-state-monitoreo">
+        <div class="empty-icon">
+            <i data-lucide="video"></i>
+        </div>
+        <h2>No hay cámaras registradas</h2>
+        <p>Comienza escaneando puertos USB locales o agregando feeds manuales (IP RTSP, streams HTTP) en el panel de administración.</p>
+        <a href="/admin" class="btn btn-primary" id="btn-go-admin">
+            <i data-lucide="plus"></i> Configurar mi Primera Cámara
+        </a>
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function toggleCameraStatus(cameraId, button) {
+        fetch(`/admin/toggle/${cameraId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Reload the page to reset the live video streams correctly
+                window.location.reload();
+            }
+        })
+        .catch(err => console.error("Error toggling camera:", err));
+    }
+</script>
+{% endblock %}

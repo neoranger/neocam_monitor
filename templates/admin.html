@@ -1,0 +1,422 @@
+{% extends 'layout.html' %}
+
+{% block title %}Administración de Cámaras - NeoCam Monitor{% endblock %}
+
+{% block extra_css %}
+<style>
+    .admin-layout {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 2rem;
+        align-items: start;
+    }
+
+    .form-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .section-title {
+        font-size: 1.35rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.5rem;
+    }
+
+    .scan-box {
+        background: rgba(16, 185, 129, 0.03);
+        border: 1px dashed rgba(16, 185, 129, 0.2);
+        border-radius: 0.75rem;
+        padding: 1.25rem;
+        text-align: center;
+    }
+
+    .scan-results {
+        margin-top: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        text-align: left;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .scan-item {
+        background: rgba(15, 23, 42, 0.5);
+        border: 1px solid var(--border-color);
+        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.9rem;
+    }
+
+    .camera-table-card {
+        padding: 1.5rem;
+    }
+
+    .camera-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .camera-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.3);
+        border: 1px solid var(--border-color);
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        transition: var(--transition-smooth);
+    }
+
+    .camera-item:hover {
+        border-color: var(--border-hover);
+        background: rgba(15, 23, 42, 0.5);
+    }
+
+    .camera-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .camera-meta-name {
+        font-weight: 600;
+        font-size: 1.05rem;
+    }
+
+    .camera-meta-details {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    .actions-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    /* Switch Style */
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 2.75rem;
+        height: 1.5rem;
+    }
+
+    .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(255, 255, 255, 0.1);
+        transition: .4s;
+        border-radius: 34px;
+        border: 1px solid var(--border-color);
+    }
+
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 1rem;
+        width: 1rem;
+        left: 3px;
+        bottom: 2px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    }
+
+    input:checked + .slider {
+        background-color: var(--primary);
+        border-color: var(--primary);
+    }
+
+    input:checked + .slider:before {
+        transform: translateX(1.15rem);
+    }
+
+    /* Edit Modal or Collapsible Form */
+    .edit-form-container {
+        display: none;
+        width: 100%;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px dashed var(--border-color);
+    }
+
+    @media (max-width: 1024px) {
+        .admin-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <h1 id="title-admin">Panel de Administración</h1>
+    <p style="color: var(--text-secondary);">Agrega, escanea, modifica y configura tus dispositivos de video.</p>
+</div>
+
+<div class="admin-layout" id="admin-layout">
+    <!-- Panel Izquierdo: Formularios -->
+    <div class="form-panel">
+        
+        <!-- Autodetectar USB -->
+        <div class="glass-card" id="card-scan-usb">
+            <h2 class="section-title"><i data-lucide="scan"></i> Auto-Detectar USB</h2>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Escanea el bus del sistema en busca de cámaras conectadas directamente en los puertos de tu homeserver.
+            </p>
+            <div class="scan-box">
+                <button type="button" onclick="scanUsbPorts()" class="btn btn-primary btn-sm" style="width: 100%;" id="btn-scan-action">
+                    <i data-lucide="refresh-cw"></i> Buscar Cámaras USB
+                </button>
+                <div class="scan-results" id="scan-results" style="display: none;">
+                    <!-- JS populated -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Agregar Manual -->
+        <div class="glass-card" id="card-add-manual">
+            <h2 class="section-title"><i data-lucide="plus-circle"></i> Agregar Cámara</h2>
+            <form action="/admin/add" method="POST" id="form-add-camera">
+                <div class="input-group">
+                    <label for="name">Nombre de la Cámara</label>
+                    <input type="text" name="name" id="name" class="form-control" placeholder="Ej: Cámara Patio, Webcam..." required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="type">Tipo de Conexión</label>
+                    <select name="type" id="type" class="form-control" onchange="adjustSourcePlaceholder()" required>
+                        <option value="usb">Cámara USB Local</option>
+                        <option value="rtsp">Cámara IP (RTSP)</option>
+                        <option value="http">Stream Web / IP Cam (HTTP MJPEG)</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="source" id="source-label">Origen / Ruta del Dispositivo</label>
+                    <input type="text" name="source" id="source" class="form-control" placeholder="Ej: 0 o /dev/video0" required>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width: 100%;" id="btn-submit-camera">
+                    <i data-lucide="save"></i> Registrar Cámara
+                </button>
+            </form>
+        </div>
+
+    </div>
+
+    <!-- Panel Derecho: Lista de Cámaras -->
+    <div class="glass-card camera-table-card" id="card-camera-list">
+        <h2 class="section-title"><i data-lucide="video"></i> Cámaras Configuradas</h2>
+        
+        {% if cameras %}
+            <div class="camera-list" id="camera-list">
+                {% for camera in cameras %}
+                    <div class="camera-item-wrapper" id="wrapper-{{ camera.id }}">
+                        <div class="camera-item">
+                            <div class="camera-meta">
+                                <div class="camera-meta-name" id="camera-name-display-{{ camera.id }}">{{ camera.name }}</div>
+                                <div class="camera-meta-details">
+                                    <span class="badge {% if camera.type == 'usb' %}badge-success{% else %}badge-info{% endif %}">{{ camera.type | upper }}</span>
+                                    <span style="font-family: monospace; font-size: 0.8rem;">{{ camera.source }}</span>
+                                </div>
+                            </div>
+                            <div class="actions-group">
+                                <!-- Interruptor Activo/Inactivo -->
+                                <label class="switch" title="Activar/Desactivar Cámara">
+                                    <input type="checkbox" id="switch-{{ camera.id }}" {% if camera.is_enabled %}checked{% endif %} onchange="toggleCameraActive({{ camera.id }}, this)">
+                                    <span class="slider"></span>
+                                </label>
+
+                                <!-- Editar -->
+                                <button onclick="toggleEditForm({{ camera.id }})" class="btn btn-secondary btn-sm" id="btn-edit-toggle-{{ camera.id }}" title="Editar">
+                                    <i data-lucide="edit" style="width: 0.95rem; height: 0.95rem;"></i>
+                                </button>
+
+                                <!-- Eliminar -->
+                                <form action="/admin/delete/{{ camera.id }}" method="POST" style="margin: 0;" onsubmit="return confirm('¿Está seguro de eliminar esta cámara?');">
+                                    <button type="submit" class="btn btn-danger btn-sm" title="Eliminar" id="btn-delete-{{ camera.id }}">
+                                        <i data-lucide="trash-2" style="width: 0.95rem; height: 0.95rem;"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Formulario de Edición (Oculto por defecto) -->
+                        <div class="edit-form-container glass-card" id="edit-form-{{ camera.id }}" style="background: rgba(15, 23, 42, 0.25);">
+                            <h4 style="margin-bottom: 1rem; font-size: 1rem; color: var(--text-secondary);">Modificar Cámara</h4>
+                            <form action="/admin/edit/{{ camera.id }}" method="POST">
+                                <div class="input-group">
+                                    <label>Nombre de la Cámara</label>
+                                    <input type="text" name="name" class="form-control" value="{{ camera.name }}" required>
+                                </div>
+                                <div class="input-group">
+                                    <label>Tipo de Conexión</label>
+                                    <select name="type" class="form-control" required>
+                                        <option value="usb" {% if camera.type == 'usb' %}selected{% endif %}>Cámara USB Local</option>
+                                        <option value="rtsp" {% if camera.type == 'rtsp' %}selected{% endif %}>Cámara IP (RTSP)</option>
+                                        <option value="http" {% if camera.type == 'http' %}selected{% endif %}>Stream Web / IP Cam (HTTP MJPEG)</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label>Origen / Ruta</label>
+                                    <input type="text" name="source" class="form-control" value="{{ camera.source }}" required>
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                                    <button type="button" onclick="toggleEditForm({{ camera.id }})" class="btn btn-secondary btn-sm">Cancelar</button>
+                                    <button type="submit" class="btn btn-primary btn-sm">Actualizar</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div style="text-align: center; padding: 3rem 1rem; color: var(--text-secondary);">
+                <i data-lucide="info" style="width: 2.5rem; height: 2.5rem; margin-bottom: 0.75rem; color: var(--text-muted);"></i>
+                <p>No has registrado ninguna cámara todavía. Utiliza el formulario de la izquierda para comenzar.</p>
+            </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function adjustSourcePlaceholder() {
+        const typeSelect = document.getElementById('type');
+        const sourceInput = document.getElementById('source');
+        const sourceLabel = document.getElementById('source-label');
+        
+        if (typeSelect.value === 'usb') {
+            sourceInput.placeholder = "Ej: 0 o /dev/video0";
+            sourceLabel.textContent = "Índice o Ruta del Dispositivo USB";
+        } else if (typeSelect.value === 'rtsp') {
+            sourceInput.placeholder = "Ej: rtsp://usuario:clave@192.168.1.100:554/stream1";
+            sourceLabel.textContent = "URL RTSP de la Cámara IP";
+        } else {
+            sourceInput.placeholder = "Ej: http://192.168.1.150/mjpeg_stream";
+            sourceLabel.textContent = "URL HTTP del Video Stream";
+        }
+    }
+
+    // Inicializar el placeholder al cargar
+    adjustSourcePlaceholder();
+
+    function scanUsbPorts() {
+        const resultsDiv = document.getElementById('scan-results');
+        const btn = document.getElementById('btn-scan-action');
+        
+        resultsDiv.style.display = 'block';
+        resultsDiv.innerHTML = `<div style="text-align: center; padding: 1rem;"><i data-lucide="loader-2" class="animate-spin" style="margin-right: 0.5rem; animation: spin 1s linear infinite;"></i> Escaneando dispositivos en el sistema...</div>`;
+        lucide.createIcons();
+        btn.disabled = true;
+
+        fetch('/api/scan_usb')
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            if (data.length === 0) {
+                resultsDiv.innerHTML = `<div style="color: var(--text-secondary); text-align: center; padding: 1rem;">No se detectaron cámaras web activas en /dev/video* o no se tienen permisos suficientes.</div>`;
+                return;
+            }
+            
+            let html = '<h4 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.5rem;">Cámaras Encontradas:</h4>';
+            data.forEach(dev => {
+                html += `
+                <div class="scan-item">
+                    <div>
+                        <div style="font-weight: 600;">${dev.name}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary);">${dev.path}</div>
+                    </div>
+                    <button onclick="fillFormFromScan('${dev.name}', '${dev.source}')" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem;">
+                        <i data-lucide="plus" style="width: 0.85rem; height: 0.85rem;"></i> Agregar
+                    </button>
+                </div>
+                `;
+            });
+            resultsDiv.innerHTML = html;
+            lucide.createIcons();
+        })
+        .catch(err => {
+            btn.disabled = false;
+            resultsDiv.innerHTML = `<div style="color: var(--danger); text-align: center; padding: 1rem;">Ocurrió un error al escanear. Asegúrate de que el backend OpenCV tiene acceso a /dev/video*.</div>`;
+            console.error("Error scanning USB:", err);
+        });
+    }
+
+    function fillFormFromScan(name, source) {
+        document.getElementById('name').value = name;
+        document.getElementById('type').value = 'usb';
+        document.getElementById('source').value = source;
+        adjustSourcePlaceholder();
+        // Animación de scroll al formulario
+        document.getElementById('card-add-manual').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function toggleCameraActive(cameraId, checkbox) {
+        fetch(`/admin/toggle/${cameraId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                console.log(`Camera ${cameraId} enabled state: ${data.is_enabled}`);
+            }
+        })
+        .catch(err => {
+            console.error("Error toggling camera active state:", err);
+            checkbox.checked = !checkbox.checked; // revert
+        });
+    }
+
+    function toggleEditForm(cameraId) {
+        const form = document.getElementById(`edit-form-${cameraId}`);
+        if (form.style.display === 'block') {
+            form.style.display = 'none';
+        } else {
+            form.style.display = 'block';
+        }
+    }
+</script>
+
+<style>
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    .animate-spin {
+        display: inline-block;
+        animation: spin 1s linear infinite;
+    }
+</style>
+{% endblock %}

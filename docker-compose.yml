@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  neocam_monitor:
+    build: .
+    container_name: neocam_monitor
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/instance
+      - /dev:/dev
+    privileged: true
+    environment:
+      - FLASK_ENV=production
