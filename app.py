@@ -445,6 +445,18 @@ def video_feed(camera_id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+        
+        # Migración automática para base de datos SQLite preexistente
+        try:
+            with db.engine.connect() as conn:
+                cursor = conn.execute(db.text("PRAGMA table_info(camera)"))
+                columns = [row[1] for row in cursor.fetchall()]
+                if 'is_recording_enabled' not in columns:
+                    conn.execute(db.text("ALTER TABLE camera ADD COLUMN is_recording_enabled BOOLEAN DEFAULT 0"))
+                    conn.commit()
+        except Exception as e:
+            print(f"Error ejecutando migración de BD: {e}")
+            
         # Inicializar cámaras al iniciar
         cameras = Camera.query.all()
         camera_manager.update_cameras(cameras)
