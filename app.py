@@ -2,6 +2,7 @@ import os
 import glob
 import time
 import threading
+import subprocess
 import numpy as np
 import cv2
 from flask import Flask, render_template, Response, request, redirect, url_for, jsonify
@@ -30,6 +31,23 @@ class Camera(db.Model):
             'is_enabled': self.is_enabled,
             'is_recording_enabled': self.is_recording_enabled
         }
+
+def transcode_to_h264(input_path, output_path):
+    try:
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', input_path,
+            '-c:v', 'libx264',
+            '-preset', 'superfast',
+            '-crf', '28',
+            '-pix_fmt', 'yuv420p',
+            output_path
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(input_path):
+            os.remove(input_path)
+    except Exception as e:
+        print(f"Error transcodificando video: {e}")
 
 # Stream individual de Cámara
 class CameraStream:
@@ -89,6 +107,7 @@ class CameraStream:
         
         out = None
         current_file_start = 0
+        filepath = None
         
         while self.running:
             if cap is None or not cap.isOpened():
@@ -113,6 +132,9 @@ class CameraStream:
                 if out is not None:
                     out.release()
                     out = None
+                    if filepath and os.path.exists(filepath):
+                        final_path = filepath.replace("temp_", "")
+                        threading.Thread(target=transcode_to_h264, args=(filepath, final_path), daemon=True).start()
                 time.sleep(1.0)
                 continue
                 
@@ -125,17 +147,21 @@ class CameraStream:
                 if out is None or (now - current_file_start) >= 60.0:
                     if out is not None:
                         out.release()
+                        # Transcodificar fragmento completado en segundo plano
+                        if filepath and os.path.exists(filepath):
+                            final_path = filepath.replace("temp_", "")
+                            threading.Thread(target=transcode_to_h264, args=(filepath, final_path), daemon=True).start()
                     
                     # Ejecutar limpieza de videos antiguos
                     self._cleanup_old_recordings(recordings_dir)
                     
-                    # Generar nuevo fragmento
+                    # Generar nuevo fragmento temporal
                     timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-                    filepath = os.path.join(recordings_dir, f"{timestamp_str}.mp4")
+                    filepath = os.path.join(recordings_dir, f"temp_{timestamp_str}.mp4")
                     
                     h, w = frame.shape[:2]
-                    # Codec H.264 (avc1) para compatibilidad nativa con HTML5/Navegadores
-                    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+                    # Codec mp4v para asegurar compatibilidad de escritura de OpenCV
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     out = cv2.VideoWriter(filepath, fourcc, 20.0, (w, h))
                     current_file_start = now
                 
@@ -145,6 +171,9 @@ class CameraStream:
                 if out is not None:
                     out.release()
                     out = None
+                    if filepath and os.path.exists(filepath):
+                        final_path = filepath.replace("temp_", "")
+                        threading.Thread(target=transcode_to_h264, args=(filepath, final_path), daemon=True).start()
             
             # Codificar fotograma a JPEG para el streaming web
             ret, jpeg = cv2.imencode('.jpg', frame)
@@ -157,6 +186,9 @@ class CameraStream:
             
         if out is not None:
             out.release()
+            if filepath and os.path.exists(filepath):
+                final_path = filepath.replace("temp_", "")
+                threading.Thread(target=transcode_to_h264, args=(filepath, final_path), daemon=True).start()
         if cap is not None:
             cap.release()
             
@@ -251,7 +283,7 @@ def get_recordings(camera_id):
     recordings = []
     if os.path.exists(recordings_dir):
         files = sorted(
-            [f for f in os.listdir(recordings_dir) if f.endswith('.mp4')],
+            [f for f in os.listdir(recordings_dir) if f.endswith('.mp4') and not f.startswith('temp_')],
             reverse=True
         )
         for f in files:
