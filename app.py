@@ -19,6 +19,7 @@ class Camera(db.Model):
     type = db.Column(db.String(20), nullable=False) # 'usb', 'rtsp', 'http'
     source = db.Column(db.String(255), nullable=False) # '/dev/video0', rtsp://..., http://...
     is_enabled = db.Column(db.Boolean, default=True)
+    is_recording_enabled = db.Column(db.Boolean, default=False)
 
     def to_dict(self):
         return {
@@ -26,16 +27,18 @@ class Camera(db.Model):
             'name': self.name,
             'type': self.type,
             'source': self.source,
-            'is_enabled': self.is_enabled
+            'is_enabled': self.is_enabled,
+            'is_recording_enabled': self.is_recording_enabled
         }
 
 # Stream individual de Cámara
 class CameraStream:
-    def __init__(self, camera_id, name, camera_type, source):
+    def __init__(self, camera_id, name, camera_type, source, is_recording_enabled=False):
         self.camera_id = camera_id
         self.name = name
         self.camera_type = camera_type
         self.source = source
+        self.is_recording_enabled = is_recording_enabled
         self.running = False
         self.thread = None
         self.latest_frame = None
@@ -53,6 +56,19 @@ class CameraStream:
         if self.thread:
             self.thread.join(timeout=2.0)
             
+    def _cleanup_old_recordings(self, recordings_dir):
+        try:
+            now = time.time()
+            if os.path.exists(recordings_dir):
+                for filename in os.listdir(recordings_dir):
+                    if filename.endswith('.mp4'):
+                        filepath = os.path.join(recordings_dir, filename)
+                        file_age = now - os.path.getmtime(filepath)
+                        if file_age > 900: # 15 minutos (900 segundos)
+                            os.remove(filepath)
+        except Exception as e:
+            print(f"Error limpiando grabaciones: {e}")
+
     def _update(self):
         src = self.source
         if self.camera_type == 'usb':
@@ -67,6 +83,13 @@ class CameraStream:
         cap = None
         consecutive_failures = 0
         
+        # Preparar directorio de grabaciones
+        recordings_dir = f"instance/recordings/camera_{self.camera_id}"
+        os.makedirs(recordings_dir, exist_ok=True)
+        
+        out = None
+        current_file_start = 0
+        
         while self.running:
             if cap is None or not cap.isOpened():
                 self.error_msg = f"Conectando a {self.name}..."
@@ -78,7 +101,6 @@ class CameraStream:
                 if not cap.isOpened():
                     consecutive_failures += 1
                     self.error_msg = f"Error al abrir stream. Reintentando..."
-                    # Dormir con backoff incremental
                     sleep_time = min(1.0 * consecutive_failures, 10.0)
                     time.sleep(sleep_time)
                     continue
@@ -88,13 +110,43 @@ class CameraStream:
                 self.error_msg = "Error al leer fotograma. Reconectando..."
                 cap.release()
                 cap = None
+                if out is not None:
+                    out.release()
+                    out = None
                 time.sleep(1.0)
                 continue
                 
             consecutive_failures = 0
             self.error_msg = None
             
-            # Codificar fotograma a JPEG
+            # Lógica de Grabación de Seguridad (fragmentos de 1 minuto)
+            if self.is_recording_enabled:
+                now = time.time()
+                if out is None or (now - current_file_start) >= 60.0:
+                    if out is not None:
+                        out.release()
+                    
+                    # Ejecutar limpieza de videos antiguos
+                    self._cleanup_old_recordings(recordings_dir)
+                    
+                    # Generar nuevo fragmento
+                    timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+                    filepath = os.path.join(recordings_dir, f"{timestamp_str}.mp4")
+                    
+                    h, w = frame.shape[:2]
+                    # Codec mp4v para compatibilidad estándar
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    out = cv2.VideoWriter(filepath, fourcc, 20.0, (w, h))
+                    current_file_start = now
+                
+                if out is not None:
+                    out.write(frame)
+            else:
+                if out is not None:
+                    out.release()
+                    out = None
+            
+            # Codificar fotograma a JPEG para el streaming web
             ret, jpeg = cv2.imencode('.jpg', frame)
             if ret:
                 with self.lock:
@@ -103,6 +155,8 @@ class CameraStream:
             # Mantener ~25 FPS para reducir uso de CPU
             time.sleep(0.04)
             
+        if out is not None:
+            out.release()
         if cap is not None:
             cap.release()
             
@@ -119,7 +173,13 @@ class CameraManager:
     def start_camera(self, camera):
         with self.lock:
             if camera.id not in self.streams and camera.is_enabled:
-                stream = CameraStream(camera.id, camera.name, camera.type, camera.source)
+                stream = CameraStream(
+                    camera_id=camera.id,
+                    name=camera.name,
+                    camera_type=camera.type,
+                    source=camera.source,
+                    is_recording_enabled=camera.is_recording_enabled
+                )
                 stream.start()
                 self.streams[camera.id] = stream
                 
@@ -142,10 +202,13 @@ class CameraManager:
             if cid not in active_ids:
                 self.stop_camera(cid)
                 
-        # Iniciar las nuevas habilitadas
+        # Iniciar las nuevas habilitadas o actualizar grabador de las existentes
         for camera in active_cameras:
-            if camera.is_enabled and camera.id not in self.streams:
-                self.start_camera(camera)
+            if camera.is_enabled:
+                if camera.id not in self.streams:
+                    self.start_camera(camera)
+                else:
+                    self.streams[camera.id].is_recording_enabled = camera.is_recording_enabled
 
 camera_manager = CameraManager()
 
@@ -174,10 +237,44 @@ def index():
     camera_manager.update_cameras(cameras)
     return render_template('index.html', cameras=cameras)
 
+from flask import send_from_directory
+
 @app.route('/camera/<int:camera_id>')
 def camera_detail(camera_id):
     camera = db.get_or_404(Camera, camera_id)
     return render_template('camara.html', camera=camera)
+
+@app.route('/camera/<int:camera_id>/recordings')
+def get_recordings(camera_id):
+    camera = db.get_or_404(Camera, camera_id)
+    recordings_dir = f"instance/recordings/camera_{camera_id}"
+    recordings = []
+    if os.path.exists(recordings_dir):
+        files = sorted(
+            [f for f in os.listdir(recordings_dir) if f.endswith('.mp4')],
+            reverse=True
+        )
+        for f in files:
+            filepath = os.path.join(recordings_dir, f)
+            try:
+                stat = os.stat(filepath)
+                # Formatear fecha: YYYY-MM-DD HH:MM:SS
+                mtime = time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(stat.st_mtime))
+                size_mb = round(stat.st_size / (1024 * 1024), 2)
+                recordings.append({
+                    'filename': f,
+                    'time': mtime,
+                    'size': f"{size_mb} MB"
+                })
+            except Exception:
+                pass
+    return jsonify(recordings)
+
+@app.route('/recordings/<int:camera_id>/<filename>')
+def serve_recording(camera_id, filename):
+    filename = os.path.basename(filename)
+    recordings_dir = os.path.abspath(f"instance/recordings/camera_{camera_id}")
+    return send_from_directory(recordings_dir, filename)
 
 @app.route('/admin')
 def admin():
@@ -189,9 +286,10 @@ def add_camera():
     name = request.form.get('name')
     camera_type = request.form.get('type')
     source = request.form.get('source')
+    is_rec = request.form.get('is_recording_enabled') == 'on'
     
     if name and camera_type and source:
-        new_cam = Camera(name=name, type=camera_type, source=source, is_enabled=True)
+        new_cam = Camera(name=name, type=camera_type, source=source, is_enabled=True, is_recording_enabled=is_rec)
         db.session.add(new_cam)
         db.session.commit()
         camera_manager.start_camera(new_cam)
@@ -204,6 +302,7 @@ def edit_camera(camera_id):
     camera.name = request.form.get('name')
     camera.type = request.form.get('type')
     camera.source = request.form.get('source')
+    camera.is_recording_enabled = request.form.get('is_recording_enabled') == 'on'
     
     db.session.commit()
     
@@ -227,12 +326,34 @@ def toggle_camera(camera_id):
         
     return jsonify({'success': True, 'is_enabled': camera.is_enabled})
 
+@app.route('/admin/toggle_recording/<int:camera_id>', methods=['POST'])
+def toggle_recording(camera_id):
+    camera = db.get_or_404(Camera, camera_id)
+    camera.is_recording_enabled = not camera.is_recording_enabled
+    db.session.commit()
+    
+    # Propagar cambio al stream activo
+    stream = camera_manager.get_stream(camera_id)
+    if stream:
+        stream.is_recording_enabled = camera.is_recording_enabled
+        
+    return jsonify({'success': True, 'is_recording_enabled': camera.is_recording_enabled})
+
 @app.route('/admin/delete/<int:camera_id>', methods=['POST'])
 def delete_camera(camera_id):
     camera = db.get_or_404(Camera, camera_id)
     camera_manager.stop_camera(camera_id)
     db.session.delete(camera)
     db.session.commit()
+    # Eliminar también archivos de grabaciones físicas de la cámara
+    recordings_dir = f"instance/recordings/camera_{camera_id}"
+    try:
+        if os.path.exists(recordings_dir):
+            for f in os.listdir(recordings_dir):
+                os.remove(os.path.join(recordings_dir, f))
+            os.rmdir(recordings_dir)
+    except Exception:
+        pass
     return redirect(url_for('admin'))
 
 @app.route('/api/scan_usb')

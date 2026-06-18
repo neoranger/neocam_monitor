@@ -222,6 +222,11 @@
                     <input type="text" name="source" id="source" class="form-control" placeholder="Ej: 0 o /dev/video0" required>
                 </div>
 
+                <div class="input-group" style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 0.5rem; margin-bottom: 1.25rem;">
+                    <input type="checkbox" name="is_recording_enabled" id="is_recording_enabled" style="width: auto; cursor: pointer; margin-right: 0.25rem;">
+                    <label for="is_recording_enabled" style="text-transform: none; font-size: 0.9rem; cursor: pointer; letter-spacing: normal;">Habilitar Grabación de Seguridad (Cíclica 15 min)</label>
+                </div>
+
                 <button type="submit" class="btn btn-primary" style="width: 100%;" id="btn-submit-camera">
                     <i data-lucide="save"></i> Registrar Cámara
                 </button>
@@ -244,9 +249,17 @@
                                 <div class="camera-meta-details">
                                     <span class="badge {% if camera.type == 'usb' %}badge-success{% else %}badge-info{% endif %}">{{ camera.type | upper }}</span>
                                     <span style="font-family: monospace; font-size: 0.8rem;">{{ camera.source }}</span>
+                                    {% if camera.is_recording_enabled %}
+                                        <span style="color: var(--danger); font-size: 0.75rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.5rem;"><span style="width: 6px; height: 6px; background: var(--danger); border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite;"></span>REC</span>
+                                    {% endif %}
                                 </div>
                             </div>
                             <div class="actions-group">
+                                <!-- Botón Grabador Rápido -->
+                                <button onclick="toggleRecordingActive({{ camera.id }}, this)" class="btn btn-secondary btn-sm" style="{% if camera.is_recording_enabled %}color: var(--danger); border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.05);{% endif %}" title="Grabar Cíclico" id="btn-toggle-rec-{{ camera.id }}">
+                                    <i data-lucide="video" style="width: 0.95rem; height: 0.95rem;"></i>
+                                </button>
+
                                 <!-- Interruptor Activo/Inactivo -->
                                 <label class="switch" title="Activar/Desactivar Cámara">
                                     <input type="checkbox" id="switch-{{ camera.id }}" {% if camera.is_enabled %}checked{% endif %} onchange="toggleCameraActive({{ camera.id }}, this)">
@@ -286,6 +299,10 @@
                                 <div class="input-group">
                                     <label>Origen / Ruta</label>
                                     <input type="text" name="source" class="form-control" value="{{ camera.source }}" required>
+                                </div>
+                                <div class="input-group" style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 0.5rem; margin-bottom: 1.25rem;">
+                                    <input type="checkbox" name="is_recording_enabled" id="is_rec_edit_{{ camera.id }}" {% if camera.is_recording_enabled %}checked{% endif %} style="width: auto; cursor: pointer;">
+                                    <label for="is_rec_edit_{{ camera.id }}" style="text-transform: none; font-size: 0.9rem; cursor: pointer; letter-spacing: normal;">Habilitar Grabación de Seguridad</label>
                                 </div>
                                 <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                                     <button type="button" onclick="toggleEditForm({{ camera.id }})" class="btn btn-secondary btn-sm">Cancelar</button>
@@ -397,6 +414,22 @@
             console.error("Error toggling camera active state:", err);
             checkbox.checked = !checkbox.checked; // revert
         });
+    }
+
+    function toggleRecordingActive(cameraId, button) {
+        fetch(`/admin/toggle_recording/${cameraId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            }
+        })
+        .catch(err => console.error("Error toggling recording:", err));
     }
 
     function toggleEditForm(cameraId) {

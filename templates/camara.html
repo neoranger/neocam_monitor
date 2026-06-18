@@ -103,6 +103,31 @@
         animation: pulse 1.5s infinite;
     }
 
+    /* Grabaciones Grid List */
+    .rec-item {
+        background: rgba(30, 41, 59, 0.3);
+        border: 1px solid var(--border-color);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        cursor: pointer;
+        transition: var(--transition-smooth);
+        text-align: left;
+    }
+
+    .rec-item:hover {
+        border-color: var(--secondary);
+        background: rgba(6, 182, 212, 0.08);
+        transform: translateY(-1px);
+    }
+
+    .rec-item-active {
+        border-color: var(--secondary);
+        background: rgba(6, 182, 212, 0.15);
+    }
+
     @keyframes pulse {
         0% { transform: scale(1); opacity: 1; }
         50% { transform: scale(1.3); opacity: 0.5; }
@@ -118,10 +143,14 @@
 {% endblock %}
 
 {% block content %}
-<div style="margin-bottom: 1.5rem;">
+<div class="flex-between" style="margin-bottom: 1.5rem;">
     <a href="/" class="btn btn-secondary btn-sm" id="btn-back-to-grid">
         <i data-lucide="arrow-left" style="width: 1rem; height: 1rem;"></i> Volver a la Grilla
     </a>
+    
+    <button onclick="showLiveFeed()" class="btn btn-primary btn-sm" id="btn-back-live" style="display: none; background: linear-gradient(135deg, var(--primary), #059669);">
+        <i data-lucide="video"></i> Volver al En Vivo
+    </button>
 </div>
 
 <div class="focused-layout" id="focused-layout">
@@ -130,6 +159,7 @@
         <div class="main-video-wrapper">
             {% if camera.is_enabled %}
                 <img src="{{ url_for('video_feed', camera_id=camera.id) }}" alt="{{ camera.name }}" class="main-feed-img" id="focused-video-feed">
+                <video id="recording-player" class="main-feed-img" style="display: none;" controls></video>
             {% else %}
                 <div style="position: absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#111827; color:#64748b;">
                     <div style="text-align: center;">
@@ -153,6 +183,23 @@
                 </a>
             </div>
         </div>
+
+        <!-- Historial de Grabaciones -->
+        {% if camera.is_enabled %}
+        <div class="glass-card" id="card-recordings-list" style="margin-top: 0.5rem;">
+            <h3 style="margin-bottom: 1rem; font-size: 1.2rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="history" style="color: var(--secondary); width: 1.25rem; height: 1.25rem;"></i> 
+                Grabaciones de Seguridad (Últimos 15 minutos)
+            </h3>
+            <div id="recordings-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; max-height: 250px; overflow-y: auto;">
+                <!-- JS populated -->
+            </div>
+            <div id="no-recordings-msg" style="display: none; text-align: center; padding: 2rem 1rem; color: var(--text-secondary);">
+                <i data-lucide="video-off" style="width: 2rem; height: 2rem; margin-bottom: 0.5rem; color: var(--text-muted);"></i>
+                <p>No hay grabaciones de seguridad disponibles todavía. Asegúrate de habilitar la grabación cíclica en Administración.</p>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Panel Lateral de Detalles -->
@@ -166,9 +213,23 @@
                 <div class="detail-label">Estado de Transmisión</div>
                 <div class="detail-value" style="margin-top: 0.25rem;">
                     {% if camera.is_enabled %}
-                        <span class="live-indicator"><span class="live-dot"></span> EN VIVO / TRANSMITIENDO</span>
+                        <span class="live-indicator"><span class="live-dot"></span> EN VIVO</span>
                     {% else %}
                         <span style="color: var(--danger); font-weight: 700; font-size: 0.85rem;">● APAGADA</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="detail-item">
+                <div class="detail-label">Grabación Cíclica</div>
+                <div class="detail-value" style="margin-top: 0.25rem;">
+                    {% if camera.is_recording_enabled and camera.is_enabled %}
+                        <span style="color: var(--danger); font-weight: 700; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.25rem;">
+                            <span style="width: 6px; height: 6px; background: var(--danger); border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite;"></span>
+                            ACTIVA (Guardando)
+                        </span>
+                    {% else %}
+                        <span style="color: var(--text-secondary); font-size: 0.85rem;">INACTIVA</span>
                     {% endif %}
                 </div>
             </div>
@@ -184,13 +245,6 @@
                 <div class="detail-label">Origen de la Fuente</div>
                 <div class="detail-value" style="font-family: monospace; font-size: 0.9rem;">
                     {{ camera.source }}
-                </div>
-            </div>
-
-            <div class="detail-item">
-                <div class="detail-label">ID Sistema</div>
-                <div class="detail-value">
-                    #{{ camera.id }}
                 </div>
             </div>
         </div>
@@ -231,5 +285,89 @@
         })
         .catch(err => console.error("Error toggling camera:", err));
     }
+
+    // Listar y cargar grabaciones cíclicas
+    const cameraId = {{ camera.id }};
+    const isEnabled = {% if camera.is_enabled %}true{% else %}false{% endif %};
+
+    function loadRecordings() {
+        if (!isEnabled) return;
+        
+        fetch(`/camera/${cameraId}/recordings`)
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById('recordings-container');
+            const noRecMsg = document.getElementById('no-recordings-msg');
+            
+            if (!container) return;
+            
+            if (data.length === 0) {
+                container.style.display = 'none';
+                noRecMsg.style.display = 'block';
+                return;
+            }
+            
+            container.style.display = 'grid';
+            noRecMsg.style.display = 'none';
+            
+            let html = '';
+            data.forEach(rec => {
+                html += `
+                <div class="rec-item" onclick="playRecording('${rec.filename}', this)">
+                    <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem;">
+                        <i data-lucide="play-circle" style="width: 1rem; height: 1rem; color: var(--secondary);"></i>
+                        ${rec.time}
+                    </span>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 1.4rem;">Tamaño: ${rec.size}</span>
+                </div>
+                `;
+            });
+            container.innerHTML = html;
+            lucide.createIcons();
+        })
+        .catch(err => console.error("Error loading recordings:", err));
+    }
+
+    function playRecording(filename, element) {
+        const imgFeed = document.getElementById('focused-video-feed');
+        const videoPlayer = document.getElementById('recording-player');
+        const btnBackLive = document.getElementById('btn-back-live');
+        
+        // Remover clase activa de otros items
+        document.querySelectorAll('.rec-item').forEach(el => el.classList.remove('rec-item-active'));
+        if (element) {
+            element.classList.add('rec-item-active');
+        }
+        
+        if (videoPlayer && imgFeed) {
+            imgFeed.style.display = 'none';
+            videoPlayer.style.display = 'block';
+            videoPlayer.src = `/recordings/${cameraId}/${filename}`;
+            videoPlayer.play();
+            btnBackLive.style.display = 'inline-flex';
+        }
+    }
+
+    function showLiveFeed() {
+        const imgFeed = document.getElementById('focused-video-feed');
+        const videoPlayer = document.getElementById('recording-player');
+        const btnBackLive = document.getElementById('btn-back-live');
+        
+        document.querySelectorAll('.rec-item').forEach(el => el.classList.remove('rec-item-active'));
+        
+        if (videoPlayer && imgFeed) {
+            videoPlayer.pause();
+            videoPlayer.style.display = 'none';
+            imgFeed.style.display = 'block';
+            btnBackLive.style.display = 'none';
+        }
+    }
+
+    // Cargar grabaciones al iniciar la pantalla
+    document.addEventListener("DOMContentLoaded", () => {
+        loadRecordings();
+        // Recargar el listado de grabaciones cada 30 segundos
+        setInterval(loadRecordings, 30000);
+    });
 </script>
 {% endblock %}
