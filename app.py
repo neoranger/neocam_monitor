@@ -134,8 +134,8 @@ class CameraStream:
                     filepath = os.path.join(recordings_dir, f"{timestamp_str}.mp4")
                     
                     h, w = frame.shape[:2]
-                    # Codec mp4v para compatibilidad estándar
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    # Codec H.264 (avc1) para compatibilidad nativa con HTML5/Navegadores
+                    fourcc = cv2.VideoWriter_fourcc(*'avc1')
                     out = cv2.VideoWriter(filepath, fourcc, 20.0, (w, h))
                     current_file_start = now
                 
